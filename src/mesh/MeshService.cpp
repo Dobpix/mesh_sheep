@@ -83,6 +83,28 @@ void MeshService::init()
 #endif
 }
 
+void MeshService::sendMyPosition()
+{
+    float lat = 0.0f;
+    float lon = 0.0f;
+    int sats = 0;
+    int bat = powerStatus->getBatteryChargePercent();
+
+    if (gps != nullptr) {
+        lat = gps->p.latitude_i / 10000000.0f;
+        lon = gps->p.longitude_i / 10000000.0f;
+        sats = gps->p.sats_in_view;
+    }
+
+    char response[120];
+    snprintf(response, sizeof(response), "%d;%.6f;%.6f;%d;%d", 
+             myID, lat, lon, sats, bat);
+
+    sendMessage(response);
+    
+    Serial.printf("Отправлено положение: %s\n", response);
+}
+
 void MeshService::sendMessage(const char *response)
 {
     meshtastic_MeshPacket *p = packetPool.allocZeroed();
@@ -143,30 +165,7 @@ int MeshService::handleFromRadio(const meshtastic_MeshPacket *mp)
         if (incomingID == myID)
         {
             Serial.println("Запрос на мои координаты!");
-
-            float lat = 0.0;
-            float lon = 0.0;
-            int sats = 0;
-            int bat = 0;
-
-            if (gps != nullptr) {
-                lat = gps->p.latitude_i / 10000000.0f;
-                lon = gps->p.longitude_i / 10000000.0f;
-
-                // Количество спутников
-                sats = gps->p.sats_in_view;
-            }
-
-            bat = powerStatus->getBatteryChargePercent();
-
-            char response[140];
-            snprintf(response, sizeof(response), "%d;%.6f;%.6f;%d;%d", 
-                     myID, lat, lon, sats, bat);
-
-            sendMessage(response);
-            
-            Serial.print("Отправлен ответ: ");
-            Serial.println(response);
+            sendMyPosition();
         }
     }
     printPacket("Forwarding to phone", mp);

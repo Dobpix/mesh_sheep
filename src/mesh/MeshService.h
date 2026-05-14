@@ -176,6 +176,7 @@ class MeshService
     void sendToPhone(meshtastic_MeshPacket *p);
 
     void sendMessage(const char *response);
+    void sendMyPosition();
     /// Send an MQTT message to the phone for client proxying
     virtual void sendMqttMessageToClientProxy(meshtastic_MqttClientProxyMessage *m);
 

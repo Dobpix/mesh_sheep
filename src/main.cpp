@@ -43,7 +43,7 @@
 #include <EEPROM.h>
 #define EEPROM_SIZE 512
 #define ID_ADDRESS  10
-
+int lastAutoSend = 0;
 uint8_t myID = 101;
 
 #ifdef ELECROW_ThinkNode_M5
@@ -1534,6 +1534,7 @@ void setup()
     // We manually run this to update the NodeStatus
     nodeDB->notifyObservers(true);
     loadMyID();
+    lastAutoSend = millis();
 }
 
 #endif
@@ -1660,6 +1661,11 @@ void loop()
         LOG_DEBUG("main loop delay: %d", delayMsec);
 #endif
         mainDelay.delay(delayMsec);
+    }
+    if (millis() - lastAutoSend >= 15000) 
+    {
+        lastAutoSend = millis();
+        service->sendMyPosition();
     }
 }
 #endif
