@@ -39,6 +39,13 @@
 #include <memory>
 #include <utility>
 
+
+#include <EEPROM.h>
+#define EEPROM_SIZE 512
+#define ID_ADDRESS  10
+
+uint8_t myID = 101;
+
 #ifdef ELECROW_ThinkNode_M5
 PCA9557 io(0x18, &Wire);
 #endif
@@ -296,6 +303,43 @@ void printInfo()
     LOG_INFO("S:B:%d,%s,%s,%s", HW_VENDOR, optstr(APP_VERSION), optstr(APP_ENV), optstr(APP_REPO));
 }
 #ifndef PIO_UNIT_TESTING
+
+void saveMyID(uint8_t newID) 
+{
+    if (newID == 0 || newID > 254) 
+    {
+        Serial.println("Ошибка! ID должен быть от 1 до 254");
+        return;
+    }
+    
+    EEPROM.begin(EEPROM_SIZE);
+    EEPROM.put(ID_ADDRESS, newID);
+    EEPROM.commit();
+    EEPROM.end();
+    
+    myID = newID;
+    
+    Serial.print("ID сохранён! Новый ID = ");
+    Serial.println(myID);
+}
+
+void loadMyID() 
+{
+    EEPROM.begin(EEPROM_SIZE);
+    EEPROM.get(ID_ADDRESS, myID);
+    
+    if ( myID == 255) 
+    {
+        myID = 101;
+        saveMyID(myID);
+    }
+    
+    Serial.print("Мой ID барана: ");
+    Serial.println(myID);
+    EEPROM.end();
+}
+
+
 void setup()
 {
 #if defined(R1_NEO)
@@ -1489,6 +1533,7 @@ void setup()
 
     // We manually run this to update the NodeStatus
     nodeDB->notifyObservers(true);
+    loadMyID();
 }
 
 #endif

@@ -21,6 +21,9 @@
 #include <assert.h>
 #include <string>
 
+extern uint8_t myID;
+extern void saveMyID(uint8_t newID);
+
 #if ARCH_PORTDUINO
 #include "PortduinoGlue.h"
 #endif
@@ -80,40 +83,97 @@ void MeshService::init()
 #endif
 }
 
+void MeshService::sendMessage(const char *response)
+{
+    meshtastic_MeshPacket *p = packetPool.allocZeroed();
+    p->which_payload_variant = meshtastic_MeshPacket_decoded_tag;
+    p->decoded.portnum = meshtastic_PortNum_TEXT_MESSAGE_APP;
+    memcpy(p->decoded.payload.bytes, response, strlen(response));
+    p->decoded.payload.size = strlen(response);
+    p->to = 0xFFFFFFFF;
+    p->id = generatePacketId();
+    p->rx_time = 0;
+    p->hop_limit = 7;
+    p->hop_start = 7;
+    service->sendToMesh(p, RX_SRC_LOCAL, true);
+}
+
+
 int MeshService::handleFromRadio(const meshtastic_MeshPacket *mp)
 {
-    powerFSM.trigger(EVENT_PACKET_FOR_PHONE); // Possibly keep the node from sleeping
+    powerFSM.trigger(EVENT_PACKET_FOR_PHONE);
+    nodeDB->updateFrom(*mp);
 
-    nodeDB->updateFrom(*mp); // update our DB state based off sniffing every RX packet from the radio
-    bool isPreferredRebroadcaster = config.device.role == meshtastic_Config_DeviceConfig_Role_ROUTER;
     if (mp->which_payload_variant == meshtastic_MeshPacket_decoded_tag &&
-        mp->decoded.portnum == meshtastic_PortNum_TELEMETRY_APP && mp->decoded.request_id > 0) {
-        LOG_DEBUG("Received telemetry response. Skip sending our NodeInfo");
-        //  ignore our request for its NodeInfo
-    } else if (mp->which_payload_variant == meshtastic_MeshPacket_decoded_tag && !nodeDB->getMeshNode(mp->from)->has_user &&
-               nodeInfoModule && !isPreferredRebroadcaster && !nodeDB->isFull()) {
-        if (airTime->isTxAllowedChannelUtil(true)) {
-            // Hops used by the request. If somebody in between running modified firmware modified it, ignore it
-            auto hopStart = mp->hop_start;
-            auto hopLimit = mp->hop_limit;
-            uint8_t hopsUsed = hopStart < hopLimit ? config.lora.hop_limit : hopStart - hopLimit;
-            if (hopsUsed > config.lora.hop_limit + 2) {
-                LOG_DEBUG("Skip send NodeInfo: %d hops away is too far away", hopsUsed);
-            } else {
-                LOG_INFO("Heard new node on ch. %d, send NodeInfo and ask for response", mp->channel);
-                nodeInfoModule->sendOurNodeInfo(mp->from, true, mp->channel);
+        mp->decoded.portnum == meshtastic_PortNum_TEXT_MESSAGE_APP)
+    {
+        char msg[256] = {0};
+        uint32_t len = mp->decoded.payload.size;
+        
+        strncpy(msg, (char*)mp->decoded.payload.bytes, min(len, (uint32_t)255));
+        msg[min(len, (uint32_t)255)] = '\0';
+
+        Serial.print("Пришло сообщение: ");
+        Serial.println(msg);
+
+        char *token = strtok(msg, ";");
+        if (token == NULL) return 0;
+
+        uint8_t incomingID = atoi(token);
+
+        if (incomingID == myID) {
+            token = strtok(NULL, ";");
+            if (token != NULL && atoi(token) == 14) {
+                token = strtok(NULL, ";");
+                if (token != NULL) {
+                    uint8_t newID = atoi(token);
+                    Serial.print("Команда сменить ID на ");
+                    Serial.println(newID);
+                    
+                    saveMyID(newID);
+                    
+                    char confirm[64];
+                    snprintf(confirm, sizeof(confirm), "%d;14;OK", myID);
+                    sendMessage(confirm);
+                    return 0;
+                }
             }
-        } else {
-            LOG_DEBUG("Skip sending NodeInfo > 25%% ch. util");
+        }
+
+        if (incomingID == myID)
+        {
+            Serial.println("Запрос на мои координаты!");
+
+            float lat = 0.0;
+            float lon = 0.0;
+            int sats = 0;
+            int bat = 0;
+
+            if (gps != nullptr) {
+                lat = gps->p.latitude_i / 10000000.0f;
+                lon = gps->p.longitude_i / 10000000.0f;
+
+                // Количество спутников
+                sats = gps->p.sats_in_view;
+            }
+
+            bat = powerStatus->getBatteryChargePercent();
+
+            char response[140];
+            snprintf(response, sizeof(response), "%d;%.6f;%.6f;%d;%d", 
+                     myID, lat, lon, sats, bat);
+
+            sendMessage(response);
+            
+            Serial.print("Отправлен ответ: ");
+            Serial.println(response);
         }
     }
-
     printPacket("Forwarding to phone", mp);
     sendToPhone(packetPool.allocCopy(*mp));
 
     return 0;
 }
-
 /// Do idle processing (mostly processing messages which have been queued from the radio)
 void MeshService::loop()
 {
@@ -127,8 +187,8 @@ void MeshService::loop()
         if (result == 0) // If any observer returns non-zero, we will try again
             oldFromNum = fromNum;
     }
-}
 
+}
 /// The radioConfig object just changed, call this to force the hw to change to the new settings
 void MeshService::reloadConfig(int saveWhat)
 {
